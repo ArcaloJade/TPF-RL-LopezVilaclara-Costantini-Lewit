@@ -6,9 +6,9 @@ class ValueNet(nn.Module):
         super(ValueNet, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, 256),
-            nn.ReLu(),
+            nn.ReLU(),
             nn.Linear(256, 64),
-            nn.ReLu(),
+            nn.ReLU(),
             nn.Linear(64, output_dim)
 
         )
