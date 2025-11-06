@@ -25,23 +25,31 @@ class PPO_Clip:
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=lr)
         self.mse_loss = nn.MSELoss()
+    
 
     def collect_trajectories(self, env):
         trajectories = []
         for _ in range(self.batch_size):
-            state = env.reset()
+            reward_avg = 0
+            state, _ = env.reset()
             done = False
             trajectory = []
             while not done:
                 state_tensor = torch.FloatTensor(state).unsqueeze(0)
                 with torch.no_grad():
-                    action_probs = self.policy_net(state_tensor)
-                action = np.random.choice(len(action_probs.squeeze().numpy()), p=action_probs.squeeze().numpy())
-                next_state, reward, done, _ = env.step(action)
+                    logits = self.policy_net(state_tensor)              # [1, n_actions]
+                    dist = torch.distributions.Categorical(logits=logits)
+                    action_t = dist.sample()                            # tensor scalar
+                    log_prob_t = dist.log_prob(action_t)                # para PPO
+                    action = action_t.item()
+                next_state, reward, terminated, truncated, _ = env.step(action)
+                reward_avg += reward
+                done = terminated or truncated
                 trajectory.append((state, action, reward, next_state, done))
                 state = next_state
+            reward_avg /= len(trajectory)
             trajectories.append(trajectory)
-        return trajectories
+        return trajectories, reward_avg
     
     def estimate_advantages(self, trajectories):
         all_advantages = []
@@ -104,11 +112,45 @@ class PPO_Clip:
             self.value_optimizer.step()
 
     def train(self, env):   
+        rewards = []
         for k in range(self.epochs):
-            trajectories = self.collect_trajectories(env)
+
+            trajectories, reward = self.collect_trajectories(env)
             advantages, returns = self.estimate_advantages(trajectories)
             self.maximize_objective(trajectories, advantages)
             self.fit_value_function(trajectories, returns)
+            rewards.append(reward)
+            if (k+1) % 10 == 0:
+                print(f"Epoch {k+1}/{self.epochs} completed.")
+        return rewards
+    
+
+    def evaluate(self, env):
+        rewards = []
+        state, _ = env.reset()
+        state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        while True:
+            with torch.no_grad():
+                logits = self.policy_net(state_tensor)
+                dist = torch.distributions.Categorical(logits=logits)
+                action = dist.sample().item()
+
+            # Processing:
+            obs, reward, terminated, truncated, info = env.step(action)
+            rewards.append(reward)
+
+            state_tensor = torch.FloatTensor(obs).unsqueeze(0)
+            # Checking if the player is still alive
+            if terminated:
+                break
+
+        env.close()
+
+        return rewards
+
+       
+        
+
 
 # Example usage:
 # Define your policy_net and value_net as instances of nn.Module
