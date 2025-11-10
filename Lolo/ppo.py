@@ -4,7 +4,7 @@ from torch.distributions import MultivariateNormal, Categorical
 from torch.optim import Adam
 import numpy as np
 
-from network import ActorNN, CriticNN
+from my_networks import ActorNN, CriticNN
 
 class PPO_Clip:
     def __init__(self, env):
@@ -113,13 +113,13 @@ class PPO_Clip:
         return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens, batch_rews, batch_vals, batch_dones
     
     def _init_hyperparameters(self):
-        self.timesteps_per_batch = 2048
-        self.max_timesteps_per_episode = 200
+        self.timesteps_per_batch = 4096
+        self.max_timesteps_per_episode = 5000
         self.gamma = 0.99
-        self.n_updates_per_iteration = 10
-        self.clip = 0.2
-        self.lr = 3e-4
-        self.ent_coef = 0.0
+        self.n_updates_per_iteration = 5
+        self.clip = 0.15
+        self.lr = 5e-5
+        self.ent_coef = 0.01
         self.lambda_value = 0.95
 
     # G_T = r_t + gamma * G_T+1
