@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Categorical
 from torch.optim import Adam
 import numpy as np
 
@@ -11,15 +11,24 @@ class PPO_Clip:
         # Extract environment information
         self.env = env
         self.obs_dim = env.observation_space.shape[0]
-        self.act_dim = env.action_space.shape[0]
+        if hasattr(env.action_space, "n"):
+            # Entorno DISCRETO (ej: Flappy Bird)
+            self.is_discrete = True
+            self.act_dim = env.action_space.n
+        else:
+            # Entorno CONTINUO (ej: Pendulum, BipedalWalker)
+            self.is_discrete = False
+            self.act_dim = env.action_space.shape[0]
 
         # Step 1 algorithm
         self.actor = ActorNN(self.obs_dim, self.act_dim)
         self.critic = CriticNN(self.obs_dim, 1)
         self._init_hyperparameters()
 
-        self.cov_var = torch.full(size=(self.act_dim,), fill_value = 0.5)
-        self.cov_mat = torch.diag(self.cov_var)
+        if not self.is_discrete:
+            self.cov_var = torch.full(size=(self.act_dim,), fill_value = 0.5)
+            self.cov_mat = torch.diag(self.cov_var)
+
         self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optim = Adam(self.critic.parameters(), lr=self.lr)
 
@@ -28,15 +37,22 @@ class PPO_Clip:
         self.obs_count = 1e-4 # Para evitar división por cero
 
     def get_action(self, obs):
-        obs = torch.tensor(obs, dtype=torch.float)
+        obs = torch.tensor(obs, dtype=torch.float32)
 
         mean = self.actor(obs)
-        dist = MultivariateNormal(mean, self.cov_mat)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
 
-        # Ver mejor esto del detach
-        return action.detach().numpy(), log_prob.detach()
+        if self.is_discrete:
+            # Distribución categórica (acciones discretas)
+            dist = Categorical(logits=mean)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
+            return action.item(), log_prob.detach()
+        else:
+            # Distribución normal multivariada (acciones continuas)
+            dist = MultivariateNormal(mean, self.cov_mat)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
+            return action.detach().numpy(), log_prob.detach()
     
     def rollout(self):
         # Batch data
@@ -46,10 +62,6 @@ class PPO_Clip:
         batch_rews = []             # batch rewards
         batch_rtgs = []             # batch rewards-to-go
         batch_lens = []             # episodic lengths in batch
-
-        ep_rews = []
-        ep_vals = []
-        ep_dones = []
         batch_vals = []
         batch_dones = []
 
@@ -87,9 +99,13 @@ class PPO_Clip:
             batch_rews.append(ep_rews)
             batch_vals.append(ep_vals)
             batch_dones.append(ep_dones)
-        batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float)
-        batch_acts = torch.tensor(np.array(batch_acts), dtype=torch.float)
-        batch_log_probs = torch.tensor(np.array(batch_log_probs), dtype=torch.float)
+
+        batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float32)
+        if self.is_discrete:
+            batch_acts = torch.tensor(np.array(batch_acts), dtype=torch.long)
+        else:
+            batch_acts = torch.tensor(np.array(batch_acts), dtype=torch.float32)
+        batch_log_probs = torch.tensor(np.array(batch_log_probs), dtype=torch.float32)
         # ALG STEP #4
         batch_rtgs = self.compute_rtgs(batch_rews)
 
@@ -119,10 +135,19 @@ class PPO_Clip:
     
     def evaluate(self, batch_obs, batch_acts):
         mean = self.actor(batch_obs)
-        dist = MultivariateNormal(mean, self.cov_mat)
-        log_probs = dist.log_prob(batch_acts)
+
+        if self.is_discrete:
+            dist = Categorical(logits=mean)
+            log_probs = dist.log_prob(batch_acts.long())
+        else:
+            mean = mean.squeeze(0) if mean.dim() > 1 else mean
+            dist = MultivariateNormal(mean, self.cov_mat)
+            log_probs = dist.log_prob(batch_acts)
+
         V = self.critic(batch_obs).squeeze()
-        return V, log_probs, dist.entropy()
+        entropy = dist.entropy()
+
+        return V, log_probs, entropy
     
     def calculate_gae(self, rewards, values, dones):
         batch_advantages = []
