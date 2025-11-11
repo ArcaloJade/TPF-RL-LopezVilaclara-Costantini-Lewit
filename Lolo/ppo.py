@@ -119,7 +119,7 @@ class PPO_Clip:
         self.n_updates_per_iteration = 5
         self.clip = 0.15
         self.lr = 5e-5
-        self.ent_coef = 0.01
+        self.ent_coef = 0.05
         self.lambda_value = 0.95
 
     # G_T = r_t + gamma * G_T+1
