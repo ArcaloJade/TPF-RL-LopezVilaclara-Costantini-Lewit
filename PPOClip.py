@@ -23,6 +23,7 @@ class PPO_Clip:
         self.lr = hiperparams["lr"]
         self.discount_factor = hiperparams["discount_factor"]
         self.gae_lambda = hiperparams["gae_lambda"]
+        self.max_length = hiperparams["max_length"]
         self.device = device
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.lr)
@@ -39,6 +40,7 @@ class PPO_Clip:
             state, _ = env.reset()
             done = False
             trajectory = []
+            index = 0
             while not done:
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device) 
                 with torch.no_grad():
@@ -48,6 +50,9 @@ class PPO_Clip:
                     log_prob_t = dist.log_prob(action_t)                # para PPO
                     action = action_t.item()
                 next_state, reward, terminated, truncated, _ = env.step(action)
+                if index > self.max_length:
+                    truncated = True
+                index += 1
                 reward_avg += reward
                 done = terminated or truncated
                 trajectory.append((state, action, reward, next_state, done))
@@ -199,7 +204,7 @@ class PPO_Clip:
             self.value_optimizer.step()
 
 
-    def train(self, env):   
+    def train(self, env, save_file_policy, save_file_value):   
         rewards = []
         for k in range(self.epochs):
 
@@ -210,6 +215,8 @@ class PPO_Clip:
             rewards.append(reward)
             #if (k+1) % 10 == 0:
             print(f"Epoch {k+1} -- reward: {reward:.2f}")
+            torch.save(self.policy_net.state_dict(), save_file_policy)
+            torch.save(self.value_net.state_dict(), save_file_value)
         return rewards
     
 
