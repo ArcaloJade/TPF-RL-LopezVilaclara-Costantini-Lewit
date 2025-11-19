@@ -24,6 +24,7 @@ class PPO_Clip:
         self.discount_factor = hiperparams["discount_factor"]
         self.gae_lambda = hiperparams["gae_lambda"]
         self.max_length = hiperparams["max_length"]
+        self.entropy_coeficient = hiperparams["entropy_coeficient"]
         self.device = device
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.lr)
@@ -35,8 +36,9 @@ class PPO_Clip:
 
     def collect_trajectories(self, env):
         trajectories = []
+        rewards = []
         for _ in range(self.batch_size):
-            reward_avg = 0
+            reward_sum = 0
             state, _ = env.reset()
             done = False
             trajectory = []
@@ -53,13 +55,13 @@ class PPO_Clip:
                 if index > self.max_length:
                     truncated = True
                 index += 1
-                reward_avg += reward
+                reward_sum += reward
                 done = terminated or truncated
                 trajectory.append((state, action, reward, next_state, done))
                 state = next_state
-            reward_avg /= len(trajectory)
+            rewards.append(reward_sum)
             trajectories.append(trajectory)
-        return trajectories, reward_avg
+        return trajectories, rewards
     
     # def estimate_advantages(self, trajectories):
     #     all_advantages = []
@@ -91,7 +93,7 @@ class PPO_Clip:
             rewards = [step[2] for step in trajectory]
             states = [step[0] for step in trajectory]
 
-            # ⬇️ asegurar device correcto
+            # asegurar device correcto
             states_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device)
             with torch.no_grad():
                 values = self.value_net(states_tensor).squeeze()  # (T,)
@@ -112,7 +114,7 @@ class PPO_Clip:
             all_advantages.extend(advantages)
             all_returns.extend(returns)
 
-        # ⬇️ devolver ya en el device correcto
+        # devolver ya en el device correcto
         return (torch.as_tensor(all_advantages, device=self.device),
                 torch.as_tensor(all_returns, device=self.device))
 
@@ -140,6 +142,7 @@ class PPO_Clip:
     #         policy_loss.backward()
     #         self.policy_optimizer.step()
     def maximize_objective(self, trajectories, advantages):
+        loss_list, entropy_list = [], []
         states, actions = [], []
         for trajectory in trajectories:
             for s, a, *_ in trajectory:
@@ -148,7 +151,7 @@ class PPO_Clip:
         states_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         actions_tensor = torch.as_tensor(actions, dtype=torch.long, device=self.device)
 
-        # ⬇️ si mantienes “probabilities”, al menos asegúrate de consistencia de device
+        # si mantienes “probabilities”, al menos asegúrate de consistencia de device
         with torch.no_grad():
             old_logits = self.policy_net(states_tensor)
             old_dist = torch.distributions.Categorical(logits=old_logits)
@@ -158,18 +161,24 @@ class PPO_Clip:
             logits = self.policy_net(states_tensor)
             dist = torch.distributions.Categorical(logits=logits)
             new_log_probs = dist.log_prob(actions_tensor)
+            entropy = dist.entropy().mean()
+            entropy_list.append(entropy.item())
 
-            # ⬇️ ratio correcto en PPO
+            # ratio correcto en PPO
             ratios = torch.exp(new_log_probs - old_log_probs)
 
             adv = advantages  # ya está en self.device por el cambio anterior
             surr1 = ratios * adv
             surr2 = torch.clamp(ratios, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv
             policy_loss = -torch.min(surr1, surr2).mean()
+            loss = policy_loss - self.entropy_coeficient * entropy
+            loss_list.append(loss.item())  
 
             self.policy_optimizer.zero_grad()
-            policy_loss.backward()
+            loss.backward()
             self.policy_optimizer.step()
+        
+        return loss_list, entropy_list
 
 
     # def fit_value_function(self, trajectories, returns):
@@ -210,14 +219,14 @@ class PPO_Clip:
 
             trajectories, reward = self.collect_trajectories(env)
             advantages, returns = self.estimate_advantages(trajectories)
-            self.maximize_objective(trajectories, advantages)
+            loss, entropy = self.maximize_objective(trajectories, advantages)
             self.fit_value_function(trajectories, returns)
-            rewards.append(reward)
+            rewards.append(reward[-1])
             #if (k+1) % 10 == 0:
-            print(f"Epoch {k+1} -- reward: {reward:.2f}")
+            print(f"Epoch {k+1} -- reward: {sum(reward):.2f}")
             torch.save(self.policy_net.state_dict(), save_file_policy)
             torch.save(self.value_net.state_dict(), save_file_value)
-        return rewards
+        return rewards, loss, entropy
     
 
     # def evaluate(self, env):
@@ -246,6 +255,8 @@ class PPO_Clip:
     def evaluate(self, env, num_episodes=1):
         rewards = []
         for _ in range(num_episodes):
+            ep_rewards = []
+            i = 0
             state, _ = env.reset()
             state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             while True:
@@ -256,9 +267,12 @@ class PPO_Clip:
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 rewards.append(reward)
+                ep_rewards.append(reward)
+                i += 1
 
                 state_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
                 if terminated or truncated:
+                    print(f"reward: {sum(ep_rewards)} en {i} pasos")
                     break
 
         env.close()
