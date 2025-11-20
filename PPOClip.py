@@ -2,10 +2,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import os
 
 
 class PPO_Clip:
-    def __init__(self, hiperparams, device = torch.device("cpu")):
+    def __init__(self, hiperparams):
         '''
         epochs: El maximo numero de epochs, osea el maximo k
         batch_size: El tamaño del batch D de trayectorias
@@ -16,6 +17,7 @@ class PPO_Clip:
 
         '''
         self.epochs = hiperparams["epochs"]
+        self.K = hiperparams["K"]
         self.batch_size = hiperparams["batch_size"]
         self.policy_net = hiperparams["policy_net"]
         self.value_net = hiperparams["value_net"]
@@ -25,13 +27,13 @@ class PPO_Clip:
         self.gae_lambda = hiperparams["gae_lambda"]
         self.max_length = hiperparams["max_length"]
         self.entropy_coeficient = hiperparams["entropy_coeficient"]
-        self.device = device
+        #self.device = device
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.lr)
         self.mse_loss = nn.MSELoss()
 
-        self.policy_net.to(self.device)
-        self.value_net.to(self.device)
+        self.policy_net#.to(self.device)
+        self.value_net#.to(self.device)
     
 
     def collect_trajectories(self, env):
@@ -40,11 +42,12 @@ class PPO_Clip:
         for _ in range(self.batch_size):
             reward_sum = 0
             state, _ = env.reset()
+            state = np.array(state, dtype=np.float32)
             done = False
             trajectory = []
             index = 0
             while not done:
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device) 
+                state_tensor = torch.FloatTensor(state).unsqueeze(0)#.to(self.device) 
                 with torch.no_grad():
                     logits = self.policy_net(state_tensor)              # [1, n_actions]
                     dist = torch.distributions.Categorical(logits=logits)
@@ -52,6 +55,7 @@ class PPO_Clip:
                     log_prob_t = dist.log_prob(action_t)                # para PPO
                     action = action_t.item()
                 next_state, reward, terminated, truncated, _ = env.step(action)
+                next_state = np.array(next_state, dtype=np.float32)
                 if index > self.max_length:
                     truncated = True
                 index += 1
@@ -94,7 +98,8 @@ class PPO_Clip:
             states = [step[0] for step in trajectory]
 
             # asegurar device correcto
-            states_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device)
+            states = np.array(states)      # junta la lista de ndarrays en un solo array
+            states_tensor = torch.from_numpy(states)
             with torch.no_grad():
                 values = self.value_net(states_tensor).squeeze()  # (T,)
                 values_np = values.detach().cpu().numpy()
@@ -115,8 +120,8 @@ class PPO_Clip:
             all_returns.extend(returns)
 
         # devolver ya en el device correcto
-        return (torch.as_tensor(all_advantages, device=self.device),
-                torch.as_tensor(all_returns, device=self.device))
+        return (torch.as_tensor(all_advantages),
+                torch.as_tensor(all_returns))
 
     
     # def maximize_objective(self, trajectories, advantages):
@@ -148,8 +153,9 @@ class PPO_Clip:
             for s, a, *_ in trajectory:
                 states.append(s); actions.append(a)
 
-        states_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device)
-        actions_tensor = torch.as_tensor(actions, dtype=torch.long, device=self.device)
+        states_np = np.array(states)      # junta todo en un solo array
+        states_tensor = torch.from_numpy(states_np)
+        actions_tensor = torch.as_tensor(actions, dtype=torch.long)
 
         # si mantienes “probabilities”, al menos asegúrate de consistencia de device
         with torch.no_grad():
@@ -157,7 +163,7 @@ class PPO_Clip:
             old_dist = torch.distributions.Categorical(logits=old_logits)
             old_log_probs = old_dist.log_prob(actions_tensor)
 
-        for _ in range(self.epochs):
+        for _ in range(self.K):
             logits = self.policy_net(states_tensor)
             dist = torch.distributions.Categorical(logits=logits)
             new_log_probs = dist.log_prob(actions_tensor)
@@ -198,12 +204,13 @@ class PPO_Clip:
     #         self.value_optimizer.step()
 
     def fit_value_function(self, trajectories, returns):
-        returns = returns.to(self.device)
+        #returns = returns.to(self.device)
         states = []
         for trajectory in trajectories:
             for s, *_ in trajectory:
                 states.append(s)
-        states_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device)
+        states_np = np.asarray(states)
+        states_tensor = torch.from_numpy(states_np)
 
         for _ in range(self.epochs):
             value_preds = self.value_net(states_tensor).squeeze()
@@ -214,19 +221,27 @@ class PPO_Clip:
 
 
     def train(self, env, save_file_policy, save_file_value):   
+        for path in [save_file_policy, save_file_value]:
+            if path is not None:
+                directory = os.path.dirname(path)
+                if directory != "":
+                    os.makedirs(directory, exist_ok=True)
         rewards = []
+        loss_all = []
+        entropy_all = []
         for k in range(self.epochs):
-
             trajectories, reward = self.collect_trajectories(env)
             advantages, returns = self.estimate_advantages(trajectories)
             loss, entropy = self.maximize_objective(trajectories, advantages)
             self.fit_value_function(trajectories, returns)
+            loss_all.append(loss[-1])
+            entropy_all.append(entropy[-1])
             rewards.append(reward[-1])
             #if (k+1) % 10 == 0:
-            print(f"Epoch {k+1} -- reward: {sum(reward):.2f}")
+            print(f"Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
             torch.save(self.policy_net.state_dict(), save_file_policy)
             torch.save(self.value_net.state_dict(), save_file_value)
-        return rewards, loss, entropy
+        return rewards, loss_all, entropy_all
     
 
     # def evaluate(self, env):
@@ -258,7 +273,7 @@ class PPO_Clip:
             ep_rewards = []
             i = 0
             state, _ = env.reset()
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            state_tensor = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
             while True:
                 with torch.no_grad():
                     logits = self.policy_net(state_tensor)
@@ -270,7 +285,7 @@ class PPO_Clip:
                 ep_rewards.append(reward)
                 i += 1
 
-                state_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+                state_tensor = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
                 if terminated or truncated:
                     print(f"reward: {sum(ep_rewards)} en {i} pasos")
                     break
