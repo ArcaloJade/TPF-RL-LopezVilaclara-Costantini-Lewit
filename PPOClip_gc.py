@@ -3,7 +3,57 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
+from google.cloud import storage
 
+BUCKET_NAME = "mi-bucket-rl-mateo"
+def upload_to_gcs(local_path, bucket_name, destination_blob_name):
+    """
+    Sube un archivo local a un bucket de GCS.
+    local_path: ruta del archivo en el runtime de Colab Enterprise (ej: 'weights.pth')
+    bucket_name: nombre del bucket en GCS (ej: 'mi-bucket-rl-mateo')
+    destination_blob_name: ruta/filename dentro del bucket (ej: 'checkpoints/weights.pth')
+    """
+    client = storage.Client()  # usa credenciales por defecto del entorno
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_filename(local_path)
+    print(f"Archivo subido a gs://{bucket_name}/{destination_blob_name}")
+
+#self.policy_net.state_dict()
+def save_in_gc(k, policy_net_params, value_net_params, rewards, loss, entropy):
+  BUCKET_NAME = "mi-bucket-rl-mateo"  # reemplazá por el nombre real
+  
+  local_path = f"policy_weights_epoch_{k}.pth"
+  torch.save(policy_net_params, local_path)
+  upload_to_gcs(
+      local_path=local_path,
+      bucket_name=BUCKET_NAME,
+      destination_blob_name=f"checkpoints/{local_path}"
+  )
+
+  local_path = f"value_weights_epoch_{k}.pth"
+  torch.save(value_net_params, local_path)
+  upload_to_gcs(
+      local_path=local_path,
+      bucket_name=BUCKET_NAME,
+      destination_blob_name=f"checkpoints/{local_path}"
+  )
+
+
+  metrics = {
+    "rewards": rewards,          # pueden ser listas o np.array
+    "loss": loss,
+    "entropy": entropy,
+  }
+
+  local_metrics_path = f"metrics_epoch_{k}.pt"
+  torch.save(metrics, local_metrics_path)
+
+  upload_to_gcs(
+      local_path=local_metrics_path,
+      bucket_name=BUCKET_NAME,
+      destination_blob_name=f"checkpoints/metrics_epoch_{k}.pt"
+  )
 
 class PPO_Clip:
     def __init__(self, hiperparams):
@@ -220,9 +270,8 @@ class PPO_Clip:
             self.value_optimizer.step()
 
 
-    def train(self, env, save_file_policy, save_file_value, save_metrics_file):   
-        best_reward = -float('inf')
-        for path in [save_file_policy, save_file_value, save_metrics_file]:
+    def train(self, env, save_file_policy, save_file_value):   
+        for path in [save_file_policy, save_file_value]:
             if path is not None:
                 directory = os.path.dirname(path)
                 if directory != "":
@@ -240,19 +289,40 @@ class PPO_Clip:
             rewards.append(sum(reward))
             #if (k+1) % 10 == 0:
             print(f"Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
-            #if k % 5 == 0:
-            if sum(reward) > best_reward:
-                best_reward = sum(reward)
-                print("Guardando modelos...")
-                torch.save(self.policy_net.state_dict(), save_file_policy)
-                torch.save(self.value_net.state_dict(), save_file_value)
-                metrics = {
-                "rewards": rewards,          # pueden ser listas o np.array
-                "loss": loss_all,
-                "entropy": entropy_all,
-                }
+            if k % 20 == 0:
+              local_path = f"policy_weights_epoch_{k}.pth"
+              torch.save(self.policy_net.state_dict(), local_path)
+              upload_to_gcs(
+                  local_path=local_path,
+                  bucket_name=BUCKET_NAME,
+                  destination_blob_name=f"checkpoints/{local_path}"
+              )
 
-                torch.save(metrics, save_metrics_file)
+              local_path = f"value_weights_epoch_{k}.pth"
+              torch.save(self.value_net.state_dict(), local_path)
+              upload_to_gcs(
+                  local_path=local_path,
+                  bucket_name=BUCKET_NAME,
+                  destination_blob_name=f"checkpoints/{local_path}"
+              )
+
+              metrics = {
+                "rewards": rewards,          # pueden ser listas o np.array
+                "loss": loss,
+                "entropy": entropy,
+              }
+
+              local_metrics_path = f"metrics_epoch_{k}.pt"
+              torch.save(metrics, local_metrics_path)
+
+              upload_to_gcs(
+                  local_path=local_metrics_path,
+                  bucket_name=BUCKET_NAME,
+                  destination_blob_name=f"checkpoints/metrics_epoch_{k}.pt"
+              )
+              #save_in_gc(k, self.policy_net.state_dict(), self.value_net.state_dict(), rewards, loss_all, entropy_all)
+            torch.save(self.policy_net.state_dict(), save_file_policy)
+            torch.save(self.value_net.state_dict(), save_file_value)
         return rewards, loss_all, entropy_all
     
 
