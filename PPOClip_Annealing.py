@@ -5,7 +5,7 @@ import torch.optim as optim
 import os
 
 
-class PPO_Clip:
+class PPO_Clip_Annealing:
     def __init__(self, hiperparams):
         '''
         epochs: El maximo numero de epochs, osea el maximo k
@@ -24,10 +24,7 @@ class PPO_Clip:
         self.clip_param = hiperparams["clip_param"]
         self.lr = hiperparams["lr"]
         self.discount_factor = hiperparams["discount_factor"]
-        self.gae_lambda = hiperparams["gae_lambda"]
         self.max_length = hiperparams["max_length"]
-        self.entropy_coeficient = hiperparams["entropy_coeficient"]
-        #self.device = device
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=self.lr)
         self.mse_loss = nn.MSELoss()
@@ -67,27 +64,6 @@ class PPO_Clip:
             trajectories.append(trajectory)
         return trajectories, rewards
     
-    # def estimate_advantages(self, trajectories):
-    #     all_advantages = []
-    #     all_returns = []
-    #     for trajectory in trajectories:
-    #         dones = [step[4] for step in trajectory]
-    #         rewards = [step[2] for step in trajectory]
-    #         states = [step[0] for step in trajectory]
-    #         values = self.value_net(torch.FloatTensor(states)).detach().squeeze().numpy()
-    #         advantages = np.zeros(len(rewards))
-    #         returns = np.zeros(len(rewards))
-    #         gae = 0
-    #         next_value = 0
-    #         for t in reversed(range(len(rewards))):
-    #             delta = rewards[t] + self.discount_factor * next_value * (1 - dones[t]) - values[t]
-    #             gae = delta + self.discount_factor * self.gae_lambda * (1 - dones[t]) * gae
-    #             advantages[t] = gae
-    #             returns[t] = gae + values[t]
-    #             next_value = values[t]
-    #         all_advantages.extend(advantages)
-    #         all_returns.extend(returns)
-    #     return torch.FloatTensor(all_advantages), torch.FloatTensor(all_returns)
 
     def estimate_advantages(self, trajectories):
         all_advantages = []
@@ -106,15 +82,19 @@ class PPO_Clip:
 
             advantages = np.zeros(len(rewards), dtype=np.float32)
             returns = np.zeros(len(rewards), dtype=np.float32)
-            gae = 0.0
-            next_value = 0.0
+            # gae = 0.0
+            # next_value = 0.0
+            g = 0.0
 
             for t in reversed(range(len(rewards))):
-                delta = rewards[t] + self.discount_factor * next_value * (1 - dones[t]) - values_np[t]
-                gae = delta + self.discount_factor * self.gae_lambda * (1 - dones[t]) * gae
-                advantages[t] = gae
-                returns[t] = gae + values_np[t]
-                next_value = values_np[t]
+                # delta = rewards[t] + self.discount_factor * next_value * (1 - dones[t]) - values_np[t]
+                # gae = delta + self.discount_factor * self.gae_lambda * (1 - dones[t]) * gae
+                # advantages[t] = gae
+                # returns[t] = gae + values_np[t]
+                # next_value = values_np[t]
+                g = rewards[t] + self.discount_factor * g * (1 - dones[t])
+                returns[t] = g
+                advantages[t] = returns[t] - values_np[t]
 
             all_advantages.extend(advantages)
             all_returns.extend(returns)
@@ -123,31 +103,9 @@ class PPO_Clip:
         return (torch.as_tensor(all_advantages),
                 torch.as_tensor(all_returns))
 
-    
-    # def maximize_objective(self, trajectories, advantages):
-    #     states = []
-    #     actions = []
-    #     for trajectory in trajectories:
-    #         for step in trajectory:
-    #             states.append(step[0])
-    #             actions.append(step[1])
-    #     states_tensor = torch.FloatTensor(states).to(self.device)
-    #     actions_tensor = torch.LongTensor(actions).to(self.device)
-        
-    #     old_action_probs = self.policy_net(states_tensor).gather(1, actions_tensor.unsqueeze(1)).detach()
-        
-    #     for _ in range(self.epochs):
-    #         action_probs = self.policy_net(states_tensor).gather(1, actions_tensor.unsqueeze(1))
-    #         ratios = action_probs / old_action_probs
-    #         surr1 = ratios * advantages.unsqueeze(1)
-    #         surr2 = torch.clamp(ratios, 1.0 - self.clip_param, 1.0 + self.clip_param) * advantages.unsqueeze(1)
-    #         policy_loss = -torch.min(surr1, surr2).mean()
-            
-    #         self.policy_optimizer.zero_grad()
-    #         policy_loss.backward()
-    #         self.policy_optimizer.step()
+   
     def maximize_objective(self, trajectories, advantages):
-        loss_list, entropy_list = [], []
+        loss_list = []
         states, actions = [], []
         for trajectory in trajectories:
             for s, a, *_ in trajectory:
@@ -167,8 +125,7 @@ class PPO_Clip:
             logits = self.policy_net(states_tensor)
             dist = torch.distributions.Categorical(logits=logits)
             new_log_probs = dist.log_prob(actions_tensor)
-            entropy = dist.entropy().mean()
-            entropy_list.append(entropy.item())
+        
 
             # ratio correcto en PPO
             ratios = torch.exp(new_log_probs - old_log_probs)
@@ -177,31 +134,16 @@ class PPO_Clip:
             surr1 = ratios * adv
             surr2 = torch.clamp(ratios, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv
             policy_loss = -torch.min(surr1, surr2).mean()
-            loss = policy_loss - self.entropy_coeficient * entropy
+            loss = policy_loss 
             loss_list.append(loss.item())  
-
+            
             self.policy_optimizer.zero_grad()
             loss.backward()
             self.policy_optimizer.step()
-        
-        return loss_list, entropy_list
 
-
-    # def fit_value_function(self, trajectories, returns):
-    #     returns = returns.to(self.device)
-    #     states = []
-    #     for trajectory in trajectories:
-    #         for step in trajectory:
-    #             states.append(step[0])
-    #     states_tensor = torch.FloatTensor(states).to(self.device)
         
-    #     for _ in range(self.epochs):
-    #         value_preds = self.value_net(states_tensor).squeeze()
-    #         value_loss = self.mse_loss(value_preds, returns)
-            
-    #         self.value_optimizer.zero_grad()
-    #         value_loss.backward()
-    #         self.value_optimizer.step()
+        return loss_list, None
+
 
     def fit_value_function(self, trajectories, returns):
         #returns = returns.to(self.device)
@@ -212,7 +154,7 @@ class PPO_Clip:
         states_np = np.asarray(states)
         states_tensor = torch.from_numpy(states_np)
 
-        for _ in range(self.epochs):
+        for _ in range(self.K):
             value_preds = self.value_net(states_tensor).squeeze()
             value_loss = self.mse_loss(value_preds, returns)
             self.value_optimizer.zero_grad()
@@ -229,14 +171,17 @@ class PPO_Clip:
                     os.makedirs(directory, exist_ok=True)
         rewards = []
         loss_all = []
-        entropy_all = []
         for k in range(self.epochs):
+            new_lr = self.lr * (1 - k / self.epochs)
+            for param_group in self.policy_optimizer.param_groups:
+                param_group["lr"] = new_lr
+            for param_group in self.value_optimizer.param_groups:
+                param_group["lr"] = new_lr
             trajectories, reward = self.collect_trajectories(env)
             advantages, returns = self.estimate_advantages(trajectories)
-            loss, entropy = self.maximize_objective(trajectories, advantages)
+            loss, _ = self.maximize_objective(trajectories, advantages)
             self.fit_value_function(trajectories, returns)
             loss_all.append(loss[-1])
-            entropy_all.append(entropy[-1])
             rewards.append(sum(reward))
             #if (k+1) % 10 == 0:
             print(f"Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
@@ -249,35 +194,12 @@ class PPO_Clip:
                 metrics = {
                 "rewards": rewards,          # pueden ser listas o np.array
                 "loss": loss_all,
-                "entropy": entropy_all,
+                "entropy": None,
                 }
 
                 torch.save(metrics, save_metrics_file)
-        return rewards, loss_all, entropy_all
+        return rewards, loss_all, None
     
-
-    # def evaluate(self, env):
-    #     rewards = []
-    #     state, _ = env.reset()
-    #     state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-    #     while True:
-    #         with torch.no_grad():
-    #             logits = self.policy_net(state_tensor)
-    #             dist = torch.distributions.Categorical(logits=logits)
-    #             action = dist.sample().item()
-
-    #         # Processing:
-    #         obs, reward, terminated, truncated, info = env.step(action)
-    #         rewards.append(reward)
-
-    #         state_tensor = torch.FloatTensor(obs).unsqueeze(0)
-    #         # Checking if the player is still alive
-    #         if terminated:
-    #             break
-
-    #     env.close()
-
-    #     return rewards
 
     def evaluate(self, env, num_episodes=1):
         rewards = []
