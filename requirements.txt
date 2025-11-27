@@ -1,0 +1,5 @@
+matplotlib
+torch
+flappy-bird-gymnasium
+gymnasium
+numpy
