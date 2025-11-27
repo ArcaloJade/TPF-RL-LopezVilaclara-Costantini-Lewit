@@ -116,9 +116,9 @@ def main():
         PPO_Class = modelos_disponibles[nombre_modelo]
         PPO = PPO_Class(hiperparams)
 
-        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_v1/flappy_actor.pth"
-        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_v1/flappy_critic.pth"
-        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_v1/metrics.pt"
+        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_actor.pth"
+        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_critic.pth"
+        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/metrics.pt"
 
         rewards, loss, entropy = PPO.train(
             env,
