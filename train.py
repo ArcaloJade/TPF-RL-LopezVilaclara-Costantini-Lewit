@@ -72,7 +72,7 @@ def main():
 
     print("Configuración:")
     print(f"  epochs     = {args.epochs}")
-    print(f"  lr         = {args.lr}")
+    print(f"  modelo         = {args.modelo}")
     print(f"  max_length = {args.max_length}")
 
     env = gymnasium.make("FlappyBird-v0", use_lidar=False)
@@ -119,6 +119,9 @@ def main():
         raise ValueError("Modelo no reconocido. Usar: Basic, GAE, Entropy, Annealing, Completo")
     
     for i, PPO in enumerate(PPOs):
+            env = gymnasium.make("FlappyBird-v0", use_lidar=False)
+            policy_net = PolicyNet(12, 2)
+            value_net = ValueNet(12, 1)
             save_policy_file = f"trained_net/PPO_Model_{args.modelo}_{i}/flappy_actor.pth"
             save_value_file = f"trained_net/PPO_Model_{args.modelo}_{i}/flappy_critic.pth"
             save_metric_file = f"trained_net/PPO_Model_{args.modelo}_{i}/metrics.pt"
