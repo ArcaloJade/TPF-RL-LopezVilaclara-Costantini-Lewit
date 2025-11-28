@@ -178,7 +178,7 @@ class PPO_Clip_Basic:
             loss_all.append(loss[-1])
             rewards.append(sum(reward))
             #if (k+1) % 10 == 0:
-            print(f"Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
+            print(f"Basic -- Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
             #if k % 5 == 0:
             if sum(reward) > best_reward:
                 best_reward = sum(reward)
