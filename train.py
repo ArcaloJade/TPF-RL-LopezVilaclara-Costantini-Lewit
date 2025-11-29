@@ -44,7 +44,8 @@ def plot_metrics(modelo_entrenado, hiperparams):
 
 def main():
     parser = argparse.ArgumentParser(description="Entrenamiento PPO")
-
+    parser.add_argument("--model_version", type=str, default="v99",
+                        help="Versión del modelo entrenado")
     parser.add_argument("--modelo", type=str, default="All",
                         help="Modelo a entrenar: Basic, GAE, Entropy, Annealing, Completo, All")
     parser.add_argument("--K", type=int, default=80,
@@ -97,9 +98,9 @@ def main():
         modelos_a_entrenar = [args.modelo]
 
     for i, nombre_modelo in enumerate(modelos_a_entrenar):
-        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_actor.pth"
-        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_critic.pth"
-        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/metrics.pt"
+        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_{args.model_version}/flappy_actor.pth"
+        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_{args.model_version}/flappy_critic.pth"
+        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_{args.model_version}/metrics.pt"
         print(f"\n=== Entrenando modelo: {nombre_modelo} (índice {i}) ===")
 
         env = gymnasium.make("FlappyBird-v0", use_lidar=False)

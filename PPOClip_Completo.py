@@ -184,12 +184,12 @@ class PPO_Clip_Completo:
             self.fit_value_function(trajectories, returns)
             loss_all.append(loss[-1])
             entropy_all.append(entropy[-1])
-            rewards.append(sum(reward))
+            rewards.append(np.mean(reward))
             #if (k+1) % 10 == 0:
-            print(f"Completo -- Epoch {k+1}/{self.epochs} -- reward: {sum(reward):.2f}")
+            print(f"Completo -- Epoch {k+1}/{self.epochs} -- reward: {np.mean(reward):.2f}")
             #if k % 5 == 0:
-            if sum(reward) > best_reward:
-                best_reward = sum(reward)
+            if np.mean(reward) > best_reward:
+                best_reward = np.mean(reward)
                 print("Guardando modelos...")
                 torch.save(self.policy_net.state_dict(), save_file_policy)
                 torch.save(self.value_net.state_dict(), save_file_value)
