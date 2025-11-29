@@ -67,8 +67,11 @@ def main():
                         help="Maxima longitud de una trayectoria")
     parser.add_argument("--modelo_entrenado", type=str, default="PPOClip",
                         help="Nombre base del modelo entrenado")
-    parser.add_argument("--restart_weights", type=bool, default=True,
-                        help="Reiniciar pesos de las redes")
+    parser.add_argument("--no_restart_weights",dest="restart_weights", action="store_false",
+                        help="No reiniciar pesos de las redes"
+    )
+    parser.set_defaults(restart_weights=True)
+
 
     args = parser.parse_args()
 
@@ -101,17 +104,15 @@ def main():
 
         env = gymnasium.make("FlappyBird-v0", use_lidar=False)
         if args.restart_weights:
-            # Nuevo entorno y nuevas redes PARA CADA MODELO
-            
+            print("Reiniciando pesos desde cero")
             policy_net = PolicyNet(12, 2)
             value_net = ValueNet(12, 1)
-        elif not args.restart_weights:
+        else:
+            print("Cargando pesos guardados")
             policy_net = PolicyNet(12, 2)
             value_net = ValueNet(12, 1)
             policy_net.load_state_dict(torch.load(save_policy_file))
             value_net.load_state_dict(torch.load(save_value_file))
-        else:
-            print("Error en restart_weights, debe ser True o False")
     
 
         hiperparams = {
