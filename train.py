@@ -67,6 +67,8 @@ def main():
                         help="Maxima longitud de una trayectoria")
     parser.add_argument("--modelo_entrenado", type=str, default="PPOClip",
                         help="Nombre base del modelo entrenado")
+    parser.add_argument("--restart_weights", type=bool, default=True,
+                        help="Reiniciar pesos de las redes")
 
     args = parser.parse_args()
 
@@ -92,12 +94,21 @@ def main():
         modelos_a_entrenar = [args.modelo]
 
     for i, nombre_modelo in enumerate(modelos_a_entrenar):
+        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_actor.pth"
+        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_critic.pth"
+        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/metrics.pt"
         print(f"\n=== Entrenando modelo: {nombre_modelo} (índice {i}) ===")
 
-        # Nuevo entorno y nuevas redes PARA CADA MODELO
         env = gymnasium.make("FlappyBird-v0", use_lidar=False)
-        policy_net = PolicyNet(12, 2)
-        value_net = ValueNet(12, 1)
+        if args.restart_weights:
+            # Nuevo entorno y nuevas redes PARA CADA MODELO
+            
+            policy_net = PolicyNet(12, 2)
+            value_net = ValueNet(12, 1)
+        else:
+            policy_net.load_state_dict(torch.load(save_policy_file))
+            value_net.load_state_dict(torch.load(save_value_file))
+    
 
         hiperparams = {
             "epochs": args.epochs,
@@ -116,9 +127,7 @@ def main():
         PPO_Class = modelos_disponibles[nombre_modelo]
         PPO = PPO_Class(hiperparams)
 
-        save_policy_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_actor.pth"
-        save_value_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/flappy_critic.pth"
-        save_metric_file = f"trained_net/PPO_Model_{nombre_modelo}_v2/metrics.pt"
+        
 
         rewards, loss, entropy = PPO.train(
             env,
