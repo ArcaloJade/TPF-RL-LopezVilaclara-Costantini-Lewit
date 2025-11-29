@@ -106,6 +106,8 @@ def main():
             policy_net = PolicyNet(12, 2)
             value_net = ValueNet(12, 1)
         else:
+            policy_net = PolicyNet(12, 2)
+            value_net = ValueNet(12, 1)
             policy_net.load_state_dict(torch.load(save_policy_file))
             value_net.load_state_dict(torch.load(save_value_file))
     
