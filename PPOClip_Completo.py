@@ -43,11 +43,13 @@ class PPO_Clip_Completo:
             reward_sum = 0
             state, _ = env.reset()
             state = np.array(state, dtype=np.float32)
+            # keep a consistent feature dimension even for scalar observations
+            state = state.reshape(1) if state.ndim == 0 else state
             done = False
             trajectory = []
             index = 0
             while not done:
-                state_tensor = torch.FloatTensor(state).unsqueeze(0)#.to(self.device) 
+                state_tensor = torch.as_tensor(state, dtype=torch.float32).reshape(1, -1)#.to(self.device)
                 with torch.no_grad():
                     logits = self.policy_net(state_tensor)              # [1, n_actions]
                     dist = torch.distributions.Categorical(logits=logits)
@@ -56,6 +58,7 @@ class PPO_Clip_Completo:
                     action = action_t.item()
                 next_state, reward, terminated, truncated, _ = env.step(action)
                 next_state = np.array(next_state, dtype=np.float32)
+                next_state = next_state.reshape(1) if next_state.ndim == 0 else next_state
                 if index > self.max_length:
                     truncated = True
                 index += 1
@@ -77,10 +80,15 @@ class PPO_Clip_Completo:
             states = [step[0] for step in trajectory]
 
             # asegurar device correcto
-            states = np.array(states)      # junta la lista de ndarrays en un solo array
+            states = np.array(states, dtype=np.float32)      # junta la lista de ndarrays en un solo array
+            if states.ndim == 1:
+                states = states.reshape(-1, 1)
+            else:
+                states = states.reshape(len(states), -1)
             states_tensor = torch.from_numpy(states)
             with torch.no_grad():
-                values = self.value_net(states_tensor).squeeze()  # (T,)
+                # reshape keeps a 1-D vector even when the trajectory has length 1
+                values = self.value_net(states_tensor).reshape(-1)
                 values_np = values.detach().cpu().numpy()
 
             advantages = np.zeros(len(rewards), dtype=np.float32)
@@ -111,7 +119,11 @@ class PPO_Clip_Completo:
             for s, a, *_ in trajectory:
                 states.append(s); actions.append(a)
 
-        states_np = np.array(states)      # junta todo en un solo array
+        states_np = np.array(states, dtype=np.float32)      # junta todo en un solo array
+        if states_np.ndim == 1:
+            states_np = states_np.reshape(-1, 1)
+        else:
+            states_np = states_np.reshape(len(states_np), -1)
         states_tensor = torch.from_numpy(states_np)
         actions_tensor = torch.as_tensor(actions, dtype=torch.long)
 
@@ -151,11 +163,15 @@ class PPO_Clip_Completo:
         for trajectory in trajectories:
             for s, *_ in trajectory:
                 states.append(s)
-        states_np = np.asarray(states)
+        states_np = np.asarray(states, dtype=np.float32)
+        if states_np.ndim == 1:
+            states_np = states_np.reshape(-1, 1)
+        else:
+            states_np = states_np.reshape(len(states_np), -1)
         states_tensor = torch.from_numpy(states_np)
 
         for _ in range(self.K):
-            value_preds = self.value_net(states_tensor).squeeze()
+            value_preds = self.value_net(states_tensor).reshape(-1)
             value_loss = self.mse_loss(value_preds, returns)
             self.value_optimizer.zero_grad()
             value_loss.backward()
@@ -186,9 +202,9 @@ class PPO_Clip_Completo:
             entropy_all.append(entropy[-1])
             rewards.append(np.mean(reward))
             #if (k+1) % 10 == 0:
-            print(f"Completo -- Epoch {k+1}/{self.epochs} -- reward: {np.mean(reward):.2f}")
+            print(f"Epoch {k+1}/{self.epochs} -- reward: {np.mean(reward):.2f}")
             #if k % 5 == 0:
-            if np.mean(reward) > best_reward:
+            if np.mean(reward) >= best_reward:
                 best_reward = np.mean(reward)
                 print("Guardando modelos...")
                 torch.save(self.policy_net.state_dict(), save_file_policy)
@@ -206,10 +222,11 @@ class PPO_Clip_Completo:
     def evaluate(self, env, num_episodes=1):
         rewards = []
         for _ in range(num_episodes):
-            ep_rewards = 0
+            ep_rewards = []
             i = 0
             state, _ = env.reset()
-            state_tensor = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
+            state_tensor = torch.as_tensor(state, dtype=torch.float32)
+            state_tensor = state_tensor.reshape(1, -1)
             while True:
                 with torch.no_grad():
                     logits = self.policy_net(state_tensor)
@@ -218,15 +235,15 @@ class PPO_Clip_Completo:
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 rewards.append(reward)
-                ep_rewards+=reward
+                ep_rewards.append(reward)
                 i += 1
 
-                state_tensor = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
+                state_tensor = torch.as_tensor(obs, dtype=torch.float32)
+                state_tensor = state_tensor.reshape(1, -1)
                 if terminated or truncated:
-                    print(f"reward: {ep_rewards} en {i} pasos")
+                    print(f"reward: {sum(ep_rewards)} en {i} pasos")
                     break
-            rewards.append(ep_rewards)
-        print("mean reward over episodes:", np.mean(rewards))
+
         env.close()
         return rewards
 
@@ -240,5 +257,3 @@ class PPO_Clip_Completo:
 # env = YourEnvironment()
 # ppo = PPO_Clip(epochs=10, batch_size=5, policy_net=policy_net, value_net=value_net, clip_param=0.2, lr=3e-4, discount_factor=0.99, gae_lambda=0.95)
 # ppo.train(env)
-
-
