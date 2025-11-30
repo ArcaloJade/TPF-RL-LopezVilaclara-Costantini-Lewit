@@ -223,6 +223,7 @@ class PPO_Clip_GAE:
                     break
             rewards.append(ep_rewards)
 
+        print("mean reward over episodes:", np.mean(rewards))
         env.close()
         return rewards
 

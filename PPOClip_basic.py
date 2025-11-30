@@ -218,7 +218,7 @@ class PPO_Clip_Basic:
                     print(f"reward: {ep_rewards} en {i} pasos")
                     break
             rewards.append(ep_rewards)
-
+        print("mean reward over episodes:", np.mean(rewards))
         env.close()
         return rewards
 
