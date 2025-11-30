@@ -206,7 +206,7 @@ class PPO_Clip_Completo:
     def evaluate(self, env, num_episodes=1):
         rewards = []
         for _ in range(num_episodes):
-            ep_rewards = []
+            ep_rewards = 0
             i = 0
             state, _ = env.reset()
             state_tensor = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
@@ -218,13 +218,14 @@ class PPO_Clip_Completo:
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 rewards.append(reward)
-                ep_rewards.append(reward)
+                ep_rewards+=reward
                 i += 1
 
                 state_tensor = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
                 if terminated or truncated:
-                    print(f"reward: {sum(ep_rewards)} en {i} pasos")
+                    print(f"reward: {ep_rewards} en {i} pasos")
                     break
+            rewards.append(ep_rewards)
 
         env.close()
         return rewards
